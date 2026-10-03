@@ -811,9 +811,13 @@ function openingScopeVerb(statement) {
 // scope, and scoring it as tier 1 would make every employer line evidence that
 // the candidate merely participated in whatever it linked to.
 const SCOPE_PHRASE_TIERS = [
-  [/\bworked\s+on\b/iu, 1],
-  [/\bpart\s+of\s+the\s+team\b/iu, 1],
+  [/^worked\s+on\b/iu, 1],
+  [/^part\s+of\s+the\s+team\b/iu, 1],
 ];
+
+const HEADING_RE = /^#{1,6}\s+/u;
+// First-person prose in article-digest.md opens with the subject, not the verb.
+const SUBJECT_PRONOUN_RE = /^(?:i|we)\s+/iu;
 
 // A clause, for scope purposes, is one work item and the verb that governs it.
 // Splitting on coordinators is the point: a source sentence can pair a weak
@@ -835,34 +839,38 @@ function scopeClauses(statement) {
 }
 
 /**
- * The scope tier a clause asserts, from the FIRST scope signal it contains.
+ * The scope tier a source clause gives its work item.
  *
- * First, not strongest. Scoring every token let an unrelated noun stand in for
- * the verb, because several tier words are also ordinary nouns: `drive`,
- * `design` and `support` all appear in product names, so "Built the Google
- * Drive integration" scored tier 3 and silently vouched for any ownership
- * claim linked to it. The verb a reader parses as the clause's action is the
- * first one, and a trailing noun cannot displace it.
+ * Read from the verb the clause OPENS with, the rule the target side already
+ * uses. Reading the first tier word anywhere let a noun stand in for the verb:
+ * "Developed the customer support dashboard" scored tier 1 on `support` and
+ * blocked a truthful "Built the customer support dashboard".
+ *
+ * A clause that opens with a verb outside the table ("Developed", "Managed")
+ * cannot be ranked, so it supports the claim (Infinity) instead of being
+ * dropped. The gate blocks only on positive evidence that the source is weaker,
+ * and an unranked verb is not that evidence.
+ *
+ * A markdown heading has no verb. It names a role or a work item, so it takes
+ * its strongest tier word: "### Customer Support Lead" supports a tier-3 claim
+ * and "### Billing migration" supports nothing. Read as an unranked verb, any
+ * heading that names a work item would vouch for every claim about it,
+ * including "Led the migration" over "Contributed to the migration".
  */
-function clauseScopeTier(clause) {
-  const text = String(clause ?? '');
-  let earliest = Infinity;
-  let tier = 0;
-  for (const match of text.matchAll(/[\p{L}]+/gu)) {
-    const candidate = SCOPE_VERB_TIERS.get(match[0].toLowerCase());
-    if (candidate && match.index < earliest) {
-      earliest = match.index;
-      tier = candidate;
+function sourceClauseTier(clause, heading) {
+  const text = stripListMarker(clause).replace(HEADING_RE, '');
+  if (heading) {
+    let tier = 0;
+    for (const match of text.matchAll(/[\p{L}]+/gu)) {
+      tier = Math.max(tier, SCOPE_VERB_TIERS.get(match[0].toLowerCase()) ?? 0);
     }
+    return tier;
   }
-  for (const [pattern, candidate] of SCOPE_PHRASE_TIERS) {
-    const match = pattern.exec(text);
-    if (match && match.index < earliest) {
-      earliest = match.index;
-      tier = candidate;
-    }
+  const opening = text.replace(SUBJECT_PRONOUN_RE, '');
+  for (const [pattern, tier] of SCOPE_PHRASE_TIERS) {
+    if (pattern.test(opening)) return tier;
   }
-  return tier;
+  return openingScopeVerb(opening)?.tier ?? Infinity;
 }
 
 /** Content tokens of a statement, with scope verbs removed so a tier word cannot link two entries. */
@@ -885,12 +893,6 @@ function scopeObjectTokens(text) {
  * unsourced bullet is a different defect and belongs to the checks above.
  */
 export function scopeInflationClaims(targetText, sourceText) {
-  // Only statements that assert a scope of their own are comparable. A source
-  // bullet with no scope verb ("Worked on the billing migration") neither
-  // supports nor contradicts a stronger claim, and treating its absence of a
-  // verb as tier 0 reported every sourced-but-differently-worded bullet as
-  // inflation. A bullet with no scope evidence at all is an unsourced bullet,
-  // which is the named-fact checks' business, not this one's.
   // Scoped per CLAUSE, not per statement. A statement-wide tier let the
   // strongest verb in a sentence vouch for every work item in it, so
   // "Contributed to the billing migration and led the payments rewrite"
@@ -898,14 +900,18 @@ export function scopeInflationClaims(targetText, sourceText) {
   // never about the migration.
   const sourceClauses = factStatements(sourceText)
     .map(stripListMarker)
-    .flatMap(statement => scopeClauses(statement).map(clause => ({
-      // The whole statement is what gets quoted back, since a clause on its own
-      // reads as a fragment to whoever has to go and fix cv.md.
-      statement,
-      tier: clauseScopeTier(clause),
-      tokens: new Set(scopeObjectTokens(clause)),
-    })))
-    .filter(source => source.tokens.size && source.tier >= 1);
+    .flatMap((statement) => {
+      const heading = HEADING_RE.test(statement);
+      return scopeClauses(statement).map(clause => ({
+        // The whole statement is what gets quoted back, since a clause on its own
+        // reads as a fragment to whoever has to go and fix cv.md.
+        statement,
+        heading,
+        tier: sourceClauseTier(clause, heading),
+        tokens: new Set(scopeObjectTokens(clause)),
+      }));
+    })
+    .filter(source => source.tokens.size);
   if (!sourceClauses.length) return [];
 
   const claims = [];
@@ -955,7 +961,9 @@ export function scopeInflationClaims(targetText, sourceText) {
       // invents the same thing. Using the strict threshold for both made
       // "I led that payments effort end to end" fail to rescue "Led the payments
       // rewrite", because the restatement shared only `payments`.
-      const linked = overlaps.filter(({ overlap }) => overlap >= required);
+      // A heading only vouches. It names the item without saying what the
+      // candidate did, so it is no evidence that the source is weaker.
+      const linked = overlaps.filter(({ overlap, source }) => overlap >= required && !source.heading);
       if (!linked.length) continue;
       const vouched = overlaps.some(({ overlap, source }) => overlap > 0 && source.tier >= opening.tier);
       if (vouched) continue;

@@ -529,6 +529,41 @@ try {
     fail(`compound source scoping is wrong: ${JSON.stringify({ compoundWeak, compoundStrong })}`);
   }
 
+  // The source tier comes from the verb its clause opens with. A verb outside
+  // the table, or a title, cannot be ranked, so it supports the claim.
+  const unrankedCases = [
+    ['Built the billing platform.', 'Developed the billing platform.', 'an unranked source verb supports a tier-2 claim'],
+    ['Led the payments rewrite.', 'Managed the payments rewrite.', 'an unranked source verb supports a tier-3 claim'],
+    ['Built the customer support dashboard.', 'Developed the customer support dashboard.', 'a tier word inside the object is not the source verb'],
+    ['Led the onboarding platform team.', 'Customer Support Lead for the onboarding platform.', 'a title in the source supports the claim'],
+  ];
+  const unrankedSource = join(tmp, 'unranked-cv.md');
+  for (const [target, sourceLine, label] of unrankedCases) {
+    writeFileSync(unrankedSource, sourceLine);
+    const result = verifyFacts(target, { sourcePaths: [unrankedSource], configPath: config });
+    if (!result.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+      pass(label);
+    } else {
+      fail(`${label}, but it blocked: ${JSON.stringify(result)}`);
+    }
+  }
+
+  // The other direction. A heading names the work item without a verb, and a
+  // first-person source still opens with its verb after the pronoun.
+  const stillWeakerCases = [
+    ['### Billing migration\n\n- Contributed to the billing migration.', 'a heading that names the work item does not vouch for it'],
+    ['I contributed to the billing migration.', 'a first-person source keeps its verb tier'],
+  ];
+  for (const [sourceText, label] of stillWeakerCases) {
+    writeFileSync(unrankedSource, sourceText);
+    const result = verifyFacts('Led the billing migration.', { sourcePaths: [unrankedSource], configPath: config });
+    if (result.unsupportedFacts.some(claim => claim.kind === 'scope' && claim.value === 'led the billing migration')) {
+      pass(label);
+    } else {
+      fail(`${label}, but the inflated claim passed: ${JSON.stringify(result)}`);
+    }
+  }
+
   // A line that opens with the adjective "Driven" asserts no ownership.
   const drivenSource = join(tmp, 'driven-cv.md');
   writeFileSync(drivenSource, 'Contributed to billing systems.');
