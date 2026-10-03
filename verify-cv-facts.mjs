@@ -1270,6 +1270,71 @@ export function loadFactConfig(path) {
   return { missing: false, config };
 }
 
+// Function words that tell English apart from the other Latin-script market
+// languages the project ships modes for (es, pt, fr, de, it, tr). A word that
+// English shares with one of them, such as `a`, `in` or `as`, is in neither
+// set, and `per`, `do` and `no` stay out because English CVs use them.
+const ENGLISH_FUNCTION_WORDS = new Set([
+  'the', 'and', 'of', 'to', 'for', 'with', 'from', 'by', 'at', 'on', 'is', 'was',
+  'were', 'are', 'that', 'this', 'which', 'into', 'over', 'our', 'my', 'their',
+  'its', 'has', 'have', 'had', 'been', 'it', 'or', 'not', 'also',
+]);
+const OTHER_FUNCTION_WORDS = new Set([
+  'el', 'la', 'los', 'las', 'del', 'y', 'en', 'para', 'con', 'por', 'una', 'que', 'se', 'al', 'su', 'sus', 'como', 'es', 'de',
+  'le', 'les', 'des', 'du', 'et', 'pour', 'avec', 'par', 'une', 'dans', 'sur', 'au', 'aux', 'est', 'qui',
+  'der', 'die', 'das', 'den', 'dem', 'und', 'für', 'mit', 'von', 'zu', 'ein', 'eine', 'auf', 'bei', 'im', 'ist', 'sich', 'nicht',
+  'os', 'da', 'dos', 'em', 'com', 'um', 'na', 'ao', 'não',
+  'il', 'gli', 'di', 'nel', 'della', 'che', 'è',
+  've', 'bir', 'ile', 'için', 'bu', 'olarak', 'daha',
+]);
+
+/**
+ * Whether a text reads as English, for the checks whose word lists are English.
+ *
+ * A text counts as not English when letters outside the Latin script make up
+ * more than 30% of it, or when it holds at least two function words of another
+ * market language and more of them than English ones. An empty or very short
+ * text counts as English, so a document with no evidence either way is still
+ * checked. All-caps tokens are skipped, so `MIT` is not the German `mit`.
+ *
+ * @param {string} text plain text, after stripMarkup
+ * @returns {boolean}
+ */
+function looksEnglish(text) {
+  const letters = text.match(/\p{L}/gu) ?? [];
+  const nonLatin = text.match(/(?!\p{Script=Latin})\p{L}/gu) ?? [];
+  if (letters.length && nonLatin.length / letters.length > 0.3) return false;
+  let english = 0;
+  let other = 0;
+  for (const [word] of text.matchAll(/[\p{L}]+/gu)) {
+    if (word.length > 1 && word === word.toUpperCase()) continue;
+    const lower = word.toLowerCase();
+    if (ENGLISH_FUNCTION_WORDS.has(lower)) english++;
+    else if (OTHER_FUNCTION_WORDS.has(lower)) other++;
+  }
+  return !(other >= 2 && other > english);
+}
+
+/**
+ * Explain why the scope and adoption checks did not run, or return null.
+ *
+ * Their verb table and phrase list are English, so on any other language they
+ * would pass a document they could not read. Reporting the gap through
+ * `coverage` keeps that from reading as "checked and clean".
+ *
+ * @returns {string|null}
+ */
+function scopeLanguageGap(targetText, sourceText) {
+  const targetEnglish = looksEnglish(stripMarkup(targetText));
+  const sourceEnglish = looksEnglish(stripMarkup(sourceText));
+  if (targetEnglish && sourceEnglish) return null;
+  const subject = !targetEnglish && !sourceEnglish
+    ? 'The document and its sources are'
+    : !targetEnglish ? 'The document is' : 'Its sources are';
+  return `${subject} not in English, so the scope-verb and adoption checks did not run: their word lists ` +
+    'are English-only. Check ownership verbs and adoption claims by hand.';
+}
+
 /** Resolve a CLI or configuration path relative to the selected working directory. */
 function resolveInputPath(path, cwd = process.cwd()) {
   return isAbsolute(path) ? path : join(cwd, path);
@@ -1309,12 +1374,13 @@ export function verifyFacts(targetText, {
   // in the sources, which is a different question: an inflated bullet whose
   // words happen to occur elsewhere in cv.md would be dropped, and the whole
   // finding is that the source says something WEAKER about the same entry.
-  const comparedFacts = scopeInflationClaims(targetText, sourceText)
+  const languageGap = scopeLanguageGap(targetText, sourceText);
+  const comparedFacts = (languageGap ? [] : scopeInflationClaims(targetText, sourceText))
     .filter(({ value }) => !allowedFacts.has(value));
   // Adoption claims warn instead of block. The phrase list cannot see every
   // way a source states reach, and a block makes the PDF step tell the agent to
   // stop and fix, so a missed paraphrase would get a true bullet rewritten.
-  const advisoryFacts = adoptionClaims(targetText, sourceText)
+  const advisoryFacts = (languageGap ? [] : adoptionClaims(targetText, sourceText))
     .filter(({ value }) => !allowedFacts.has(value));
   const unsupportedFacts = [...namedFacts, ...comparedFacts]
     .filter((claim, index, claims) => claims.findIndex(other => other.kind === claim.kind && other.value === claim.value) === index);
@@ -1327,7 +1393,12 @@ export function verifyFacts(targetText, {
   // Never downgrades a block and never creates one: a document that fails on
   // real evidence still fails on that, and a coverage gap only turns a would-be
   // 'pass' into 'warn' so the caller is told the gate could not read it.
-  const coverage = diagnoseCoverage(targetText);
+  // One coverage object, so callers that read `coverage.reason` keep working.
+  // A count gap keeps its reason and gains the scope sentence.
+  const countGap = diagnoseCoverage(targetText);
+  const coverage = !languageGap ? countGap
+    : countGap ? { ...countGap, message: `${countGap.message} ${languageGap}` }
+      : { reason: 'scope-not-checked', message: languageGap, spans: [] };
   const blocked = invented.length || unsupportedFacts.length || forbidden.length;
   return {
     verdict: blocked ? 'block' : (warnings.length || advisoryFacts.length || coverage) ? 'warn' : 'pass',

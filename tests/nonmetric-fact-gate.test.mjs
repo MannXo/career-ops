@@ -564,6 +564,27 @@ try {
     }
   }
 
+  // The scope and adoption word lists are English. On another language the
+  // checks do not run, and coverage says so instead of reporting a clean pass.
+  const englishSource = join(tmp, 'english-cv.md');
+  writeFileSync(englishSource, 'Contributed to the billing migration for the payments team.');
+  const germanSource = join(tmp, 'german-cv.md');
+  writeFileSync(germanSource, 'Mitarbeit an der Migration der Abrechnung für das Team und die Kunden.');
+  const languageCases = [
+    ['Lideré la migración de facturación para el equipo de pagos.', englishSource, 'a non-English document is reported as not checked'],
+    ['Led the billing migration.', germanSource, 'non-English sources are reported as not checked'],
+  ];
+  for (const [target, sourcePath, label] of languageCases) {
+    const result = verifyFacts(target, { sourcePaths: [sourcePath], configPath: config });
+    if (result.verdict === 'warn'
+        && result.coverage?.reason === 'scope-not-checked'
+        && !result.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+      pass(label);
+    } else {
+      fail(`${label}, but got: ${JSON.stringify(result)}`);
+    }
+  }
+
   // A line that opens with the adjective "Driven" asserts no ownership.
   const drivenSource = join(tmp, 'driven-cv.md');
   writeFileSync(drivenSource, 'Contributed to billing systems.');
