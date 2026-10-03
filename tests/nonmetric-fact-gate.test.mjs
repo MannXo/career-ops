@@ -1,5 +1,5 @@
 import { pass, fail } from './helpers.mjs';
-import { delegatedAuthorshipClaims, factClaims, verifyFacts } from '../verify-cv-facts.mjs';
+import { assertFacts, delegatedAuthorshipClaims, factClaims, verifyFacts } from '../verify-cv-facts.mjs';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -643,6 +643,20 @@ try {
     pass('a source-backed adoption claim passes');
   } else {
     fail(`a source-backed adoption claim was blocked: ${JSON.stringify(adoptionAllowed)}`);
+  }
+
+  // A scope block names the weaker source and gives the exact allow_facts value.
+  let scopeError = '';
+  try {
+    assertFacts('Led the migration to a service architecture.', { sourcePaths: [scopeSource], configPath: config });
+  } catch (err) {
+    scopeError = err.message;
+  }
+  if (scopeError.includes('weaker verb')
+      && scopeError.includes('add "led the migration to a service architecture" to allow_facts')) {
+    pass('a scope block says the source is weaker and gives the allow_facts value');
+  } else {
+    fail(`scope block message is missing the reason or the allow_facts value: ${JSON.stringify(scopeError)}`);
   }
 
   // allow_facts is the existing escape hatch for a verified exception, and it

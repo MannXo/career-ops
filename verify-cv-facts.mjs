@@ -1415,15 +1415,26 @@ export function verifyFacts(targetText, {
   };
 }
 
+/**
+ * Tell the user why a scope claim blocked and how to allow it once verified.
+ *
+ * The value is the exact string `allow_facts` matches, so the user can copy it.
+ */
+export function scopeClaimAdvice({ value }) {
+  return `the source gives this work a weaker verb than the CV. If the CV is right, add "${value}" to allow_facts in config/cv-facts.json`;
+}
+
 /** Verify a document and throw when it contains a blocking unsupported claim. */
 export function assertFacts(targetText, options = {}) {
   const result = verifyFacts(targetText, options);
   if (result.verdict === 'block') {
     const details = [];
     if (result.invented.length) details.push(`metric-like claims absent from sources: ${result.invented.join(', ')}`);
-    if (result.unsupportedFacts.length) details.push(`non-metric facts absent from sources: ${result.unsupportedFacts.map(({ kind, value, sourceLine }) => (
-      sourceLine ? `${kind}=${value} (source says: ${sourceLine})` : `${kind}=${value}`
-    )).join(', ')}`);
+    if (result.unsupportedFacts.length) details.push(`non-metric facts absent from sources: ${result.unsupportedFacts.map((claim) => {
+      const { kind, value, sourceLine } = claim;
+      if (kind === 'scope') return `${kind}=${value} (source says: ${sourceLine}; ${scopeClaimAdvice(claim)})`;
+      return sourceLine ? `${kind}=${value} (source says: ${sourceLine})` : `${kind}=${value}`;
+    }).join(', ')}`);
     if (result.forbidden.length) details.push(`forbidden phrases found: ${result.forbidden.join(', ')}`);
     throw new Error(`Fact check failed${options.label ? ` for ${options.label}` : ''}: ${details.join('; ')}`);
   }
@@ -2028,10 +2039,15 @@ export function runCli(args = process.argv.slice(2)) {
     }
     if (result.unsupportedFacts.length) {
       console.error('\nNon-metric facts absent from sources:');
-      for (const { kind, value, line, sourceLine } of result.unsupportedFacts) {
+      for (const claim of result.unsupportedFacts) {
+        const { kind, value, line, sourceLine } = claim;
         console.error(`  - ${kind}: ${value}`);
         if (line && line !== value) console.error(`      CV:     ${line}`);
         if (sourceLine) console.error(`      source: ${sourceLine}`);
+        if (kind === 'scope') {
+          const advice = scopeClaimAdvice(claim);
+          console.error(`      ${advice[0].toUpperCase()}${advice.slice(1)}`);
+        }
       }
     }
     if (result.forbidden.length) {
