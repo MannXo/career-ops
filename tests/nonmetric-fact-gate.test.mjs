@@ -579,9 +579,12 @@ try {
   const unsourcedAdoption = verifyFacts('Built internal tooling used daily across the engineering org.', {
     sourcePaths: [scopeSource], configPath: config,
   });
-  if (unsourcedAdoption.verdict === 'block'
-      && unsourcedAdoption.unsupportedFacts.some(claim => claim.kind === 'adoption' && claim.value === 'used daily')) {
-    pass('an adoption claim absent from every source blocks');
+  // A warning, not a block: the phrase list cannot see every way a source
+  // states reach, and a block would get a true bullet rewritten.
+  if (unsourcedAdoption.verdict === 'warn'
+      && unsourcedAdoption.advisoryFacts.some(claim => claim.kind === 'adoption' && claim.value === 'used daily')
+      && !unsourcedAdoption.unsupportedFacts.some(claim => claim.kind === 'adoption')) {
+    pass('an adoption claim absent from every source warns');
   } else {
     fail(`an unsourced adoption claim was accepted: ${JSON.stringify(unsourcedAdoption)}`);
   }
@@ -589,9 +592,9 @@ try {
   const orgWide = verifyFacts('Rolled the linter out organization-wide.', {
     sourcePaths: [scopeSource], configPath: config,
   });
-  if (orgWide.verdict === 'block'
-      && orgWide.unsupportedFacts.some(claim => claim.kind === 'adoption' && claim.value === 'organization-wide')) {
-    pass('the spelled-out organization-wide claim blocks');
+  if (orgWide.verdict === 'warn'
+      && orgWide.advisoryFacts.some(claim => claim.kind === 'adoption' && claim.value === 'organization-wide')) {
+    pass('the spelled-out organization-wide claim warns');
   } else {
     fail(`organization-wide bypassed the gate: ${JSON.stringify(orgWide)}`);
   }
@@ -603,7 +606,7 @@ try {
   const paraphrase = verifyFacts('Adopted by 3 teams. Rolled out company-wide.', {
     sourcePaths: [paraphrased], configPath: config,
   });
-  if (!paraphrase.unsupportedFacts.some(claim => claim.kind === 'adoption')) {
+  if (!paraphrase.advisoryFacts.some(claim => claim.kind === 'adoption')) {
     pass('a source that words its adoption differently still supports the claim');
   } else {
     fail(`a paraphrased adoption claim was blocked: ${JSON.stringify(paraphrase)}`);
@@ -615,7 +618,7 @@ try {
     sourcePaths: [sourcedAdoption], configPath: config,
   });
   if (adoptionAllowed.verdict === 'pass'
-      && !adoptionAllowed.unsupportedFacts.some(claim => claim.kind === 'adoption')) {
+      && !adoptionAllowed.advisoryFacts.some(claim => claim.kind === 'adoption')) {
     pass('a source-backed adoption claim passes');
   } else {
     fail(`a source-backed adoption claim was blocked: ${JSON.stringify(adoptionAllowed)}`);

@@ -1286,7 +1286,7 @@ function sourceContainsFact(sourceText, value) {
 /**
  * @param {string} targetText generated candidate-facing HTML/Markdown/text
  * @param {{ sourcePaths?: string[], configPath?: string, cwd?: string }} options
- * @returns {{ verdict: 'pass'|'warn'|'block', invented: string[], unsupportedFacts: object[], forbidden: string[], warnings: string[] }}
+ * @returns {{ verdict: 'pass'|'warn'|'block', invented: string[], unsupportedFacts: object[], advisoryFacts: object[], forbidden: string[], warnings: string[] }}
  * @throws when the config is invalid
  */
 export function verifyFacts(targetText, {
@@ -1309,10 +1309,13 @@ export function verifyFacts(targetText, {
   // in the sources, which is a different question: an inflated bullet whose
   // words happen to occur elsewhere in cv.md would be dropped, and the whole
   // finding is that the source says something WEAKER about the same entry.
-  const comparedFacts = [
-    ...scopeInflationClaims(targetText, sourceText),
-    ...adoptionClaims(targetText, sourceText),
-  ].filter(({ value }) => !allowedFacts.has(value));
+  const comparedFacts = scopeInflationClaims(targetText, sourceText)
+    .filter(({ value }) => !allowedFacts.has(value));
+  // Adoption claims warn instead of block. The phrase list cannot see every
+  // way a source states reach, and a block makes the PDF step tell the agent to
+  // stop and fix, so a missed paraphrase would get a true bullet rewritten.
+  const advisoryFacts = adoptionClaims(targetText, sourceText)
+    .filter(({ value }) => !allowedFacts.has(value));
   const unsupportedFacts = [...namedFacts, ...comparedFacts]
     .filter((claim, index, claims) => claims.findIndex(other => other.kind === claim.kind && other.value === claim.value) === index);
   const forbidden = config.forbidden_phrases
@@ -1327,9 +1330,10 @@ export function verifyFacts(targetText, {
   const coverage = diagnoseCoverage(targetText);
   const blocked = invented.length || unsupportedFacts.length || forbidden.length;
   return {
-    verdict: blocked ? 'block' : (warnings.length || coverage) ? 'warn' : 'pass',
+    verdict: blocked ? 'block' : (warnings.length || advisoryFacts.length || coverage) ? 'warn' : 'pass',
     invented,
     unsupportedFacts,
+    advisoryFacts,
     forbidden,
     warnings,
     coverage,
@@ -1890,6 +1894,14 @@ function runSelfTest() {
   return failed ? 1 : 0;
 }
 
+/** Print adoption claims no source makes, for a human to confirm. */
+export function printAdvisoryFacts(facts = [], print = console.warn) {
+  for (const { kind, value, line } of facts) {
+    print(`  - unsourced ${kind} claim: ${value}`);
+    if (line && line !== value) print(`      CV: ${line}`);
+  }
+}
+
 /** Run the fact validator CLI and return its process exit code. */
 export function runCli(args = process.argv.slice(2)) {
   if (args.length === 1 && args[0] === '--self-test') return runSelfTest();
@@ -1931,6 +1943,7 @@ export function runCli(args = process.argv.slice(2)) {
     if (result.verdict === 'warn') {
       console.error(`CV fact check warning: ${basename(targetPath)}`);
       for (const phrase of result.warnings) console.error(`  - advisory phrase: ${phrase}`);
+      printAdvisoryFacts(result.advisoryFacts, console.error);
       if (result.coverage) {
         console.error(`  - not checked: ${result.coverage.message}`);
         for (const span of result.coverage.spans.slice(0, 8)) console.error(`      ${span}`);
@@ -1958,7 +1971,7 @@ export function runCli(args = process.argv.slice(2)) {
     return 1;
   } catch (err) {
     if (parsed.json) {
-      console.log(JSON.stringify({ verdict: 'block', invented: [], unsupportedFacts: [], forbidden: [], warnings: [], coverage: null, errors: [err.message] }));
+      console.log(JSON.stringify({ verdict: 'block', invented: [], unsupportedFacts: [], advisoryFacts: [], forbidden: [], warnings: [], coverage: null, errors: [err.message] }));
       return 1;
     }
     console.error(`ERROR: ${err.message}`);
