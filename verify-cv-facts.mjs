@@ -757,6 +757,10 @@ function countMatches(clean) {
 // The three tiers are the ones #3685 fixes. Inflections are listed because the
 // tier of a claim is a property of the verb, not of its conjugation, and a
 // table that only knew `led` would be bypassed by `leads` or `leading`.
+//
+// `driven` is left out on purpose. At the start of a line it is the adjective
+// ("Driven backend engineer"), never the verb, so it claimed an ownership the
+// line does not assert.
 const SCOPE_VERB_TIERS = new Map([
   // Tier 1 — participation. Someone else owned the outcome.
   ['contribute', 1], ['contributed', 1], ['contributes', 1], ['contributing', 1],
@@ -770,7 +774,7 @@ const SCOPE_VERB_TIERS = new Map([
   ['lead', 3], ['led', 3], ['leads', 3], ['leading', 3],
   ['own', 3], ['owned', 3], ['owns', 3], ['owning', 3],
   ['architect', 3], ['architected', 3], ['architects', 3], ['architecting', 3],
-  ['drive', 3], ['drove', 3], ['drives', 3], ['driving', 3], ['driven', 3],
+  ['drive', 3], ['drove', 3], ['drives', 3], ['driving', 3],
 ]);
 
 // Bullet glyphs and list markers survive stripMarkup. They have to come off

@@ -529,6 +529,18 @@ try {
     fail(`compound source scoping is wrong: ${JSON.stringify({ compoundWeak, compoundStrong })}`);
   }
 
+  // A line that opens with the adjective "Driven" asserts no ownership.
+  const drivenSource = join(tmp, 'driven-cv.md');
+  writeFileSync(drivenSource, 'Contributed to billing systems.');
+  const drivenAdjective = verifyFacts('Driven backend engineer focused on billing systems.', {
+    sourcePaths: [drivenSource], configPath: config,
+  });
+  if (!drivenAdjective.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+    pass('a leading "Driven" adjective is not a scope verb');
+  } else {
+    fail(`"Driven" as an adjective was read as an ownership claim: ${JSON.stringify(drivenAdjective)}`);
+  }
+
   const unsourcedAdoption = verifyFacts('Built internal tooling used daily across the engineering org.', {
     sourcePaths: [scopeSource], configPath: config,
   });
