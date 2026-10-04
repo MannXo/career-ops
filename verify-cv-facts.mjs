@@ -802,7 +802,46 @@ function openingScopeVerb(statement) {
   // into clauses, which puts a mid-sentence "and led to ..." at the start of
   // one, where it would otherwise read as a tier-3 ownership claim.
   if (/^(?:lead|leads|leading|led)\s+to\b/i.test(text)) return null;
+  if (opensWithJobTitle(text)) return null;
   return { verb, tier };
+}
+
+// "Lead backend engineer for the billing migration", "Architect for the
+// payments platform": the bare form opening a line is a job title, not a verb,
+// the same reason `driven` is left out of the table. Read as a verb it claimed
+// tier-3 ownership the line never asserts and blocked a truthful CV whose
+// source said "Contributed to the billing migration".
+//
+// Only the bare forms can be a title, and only in two shapes: followed straight
+// by a preposition ("Architect for ...", "Lead on ..."), or by a role noun
+// within the next few words with no determiner in between ("Lead backend
+// engineer"). A determiner is what marks the verb: "Lead the platform team",
+// "Lead a team of engineers" are present-tense ownership claims and stay
+// checked. The role noun is singular on purpose, so "Lead engineers through
+// the migration" still reads as the verb it is.
+const TITLE_BARE_FORM_RE = /^(?:lead|architect)$/iu;
+const TITLE_PREPOSITIONS = new Set(['for', 'on', 'of', 'at', 'in', 'with']);
+const TITLE_DETERMINERS = new Set([
+  'the', 'a', 'an', 'our', 'my', 'their', 'its', 'his', 'her', 'this', 'that',
+  'these', 'those', 'all', 'every', 'each', 'both', 'two', 'three', 'four', 'five',
+]);
+const TITLE_ROLE_NOUNS = new Set([
+  'engineer', 'developer', 'designer', 'architect', 'manager', 'scientist',
+  'analyst', 'consultant', 'programmer', 'researcher', 'administrator',
+  'specialist', 'strategist', 'technologist', 'tester', 'writer',
+]);
+const TITLE_LOOKAHEAD_WORDS = 3;
+
+/** True when a statement opens with "Lead"/"Architect" used as a job title, not as a verb. */
+function opensWithJobTitle(text) {
+  const words = String(text ?? '').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  if (words.length < 2 || !TITLE_BARE_FORM_RE.test(words[0])) return false;
+  if (TITLE_PREPOSITIONS.has(words[1])) return true;
+  for (const word of words.slice(1, 1 + TITLE_LOOKAHEAD_WORDS)) {
+    if (TITLE_DETERMINERS.has(word) || /^\p{N}/u.test(word)) return false;
+    if (TITLE_ROLE_NOUNS.has(word)) return true;
+  }
+  return false;
 }
 
 // Tier evidence a single word cannot carry. "Worked on" is the participation
@@ -1884,6 +1923,23 @@ function runSelfTest() {
   equal('led to is a result, not an ownership claim',
     scopeOf('Refactored the pipeline and led to a faster speedup.', 'Contributed to the speedup.'),
     []);
+  // The bare form opening a line is a job title. Read as a verb it blocked a
+  // truthful CV: a summary line naming the role, against a source bullet that
+  // says the candidate contributed to the same work item.
+  equal('a leading job title is not an ownership claim',
+    scopeOf('Lead backend engineer for the billing migration.', 'Contributed to the billing migration.'),
+    []);
+  equal('a title followed straight by a preposition is not an ownership claim',
+    scopeOf('Architect for the payments platform.', 'Contributed to the payments platform.'),
+    []);
+  // A determiner marks the verb: the present-tense bullet of a current role is
+  // still an ownership claim, and still checked.
+  equal('present-tense "Lead the ..." is still an ownership claim',
+    scopeOf('Lead the billing migration.', 'Contributed to the billing migration.'),
+    ['lead the billing migration']);
+  equal('a plural object after "Lead" is still the verb',
+    scopeOf('Lead engineers through the billing migration.', 'Contributed to the billing migration.'),
+    ['lead engineers through the billing migration']);
 
   // Several tier words are also ordinary nouns, so scoring every token let a
   // product name stand in for the verb: `drive` in "Google Drive" scored the
